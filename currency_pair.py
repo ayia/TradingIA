@@ -5,6 +5,11 @@ import numpy as np
 import pandas as pd
 import requests
 from tensorflow.keras.models import load_model
+import tensorflow as tf
+
+# Suppress TensorFlow logs
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+tf.get_logger().setLevel('ERROR')
 
 def fetch_data(pair_name):
     url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/Lats10IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour"

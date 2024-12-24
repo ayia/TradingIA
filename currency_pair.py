@@ -6,16 +6,28 @@ import pandas as pd
 import requests
 from tensorflow.keras.models import load_model
 import tensorflow as tf
+import logging
 
 # Suppress TensorFlow logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-tf.get_logger().setLevel('ERROR')
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppresses INFO and WARNING logs
+tf.get_logger().setLevel(logging.ERROR)   # Suppresses TensorFlow logs
+logging.getLogger('tensorflow').setLevel(logging.ERROR)  # Suppress TensorFlow root logger
+
+# Suppress Abseil logs
+logging.getLogger('absl').setLevel(logging.ERROR)
 
 def fetch_data(pair_name):
     url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/Lats10IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour"
     response = requests.get(url, headers={"accept": "text/plain"})
     response.raise_for_status()
     return response.json()  # Returns JSON data
+
+def calculate_pips(price1, price2, pair_name):
+    """
+    Calculate the pip difference based on the currency pair conventions.
+    """
+    multiplier = 100 if "JPY" in pair_name.upper() else 10000
+    return abs(price1 - price2) * multiplier
 
 def predict_next_bar(pair_name, models_root="Models", window_size=10):
     # Fetch the JSON data from the API
@@ -57,11 +69,33 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
 
     # pred = [ [open, close, high, low] ]
     open_pred, close_pred, high_pred, low_pred = pred[0]
+
+    # Determine the direction
+    direction = "Buy" if close_pred > open_pred else "Sell"
+
+    # Calculate TP pips
+    tp_pips = calculate_pips(open_pred, close_pred, pair_name)
+
+    # Calculate SL pips
+    if direction == "Buy":
+        sl_pips = calculate_pips(open_pred, low_pred, pair_name)
+    else:  # Sell
+        sl_pips = calculate_pips(open_pred, high_pred, pair_name)
+
+    # Format the output based on the pair type
+    decimal_format = ".5f" if "JPY" not in pair_name.upper() else ".3f"
+
     print(f"Prediction for {pair_name}:")
-    print("  Open :", open_pred)
-    print("  Close:", close_pred)
-    print("  High :", high_pred)
-    print("  Low  :", low_pred)
+    print("  Direction:", direction)
+    print(f"  TP Pip Difference: {tp_pips:.2f} pips")
+    print(f"  SL Pip Difference: {sl_pips:.2f} pips")
+
+    
+    
+    print(f"  Open : {open_pred:{decimal_format}}")
+    print(f"  Close: {close_pred:{decimal_format}}")
+    print(f"  High : {high_pred:{decimal_format}}")
+    print(f"  Low  : {low_pred:{decimal_format}}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

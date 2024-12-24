@@ -82,6 +82,13 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
     else:  # Sell
         sl_pips = calculate_pips(open_pred, high_pred, pair_name)
 
+    # Calculate Risk-Reward Ratio
+    if sl_pips > 0:
+        risk_reward_ratio = tp_pips / sl_pips
+        risk_reward_display = f"1:{risk_reward_ratio:.2f}"  # Format as 1:x
+    else:
+        risk_reward_display = "Undefined"  # Avoid division by zero
+
     # Format the output based on the pair type
     decimal_format = ".5f" if "JPY" not in pair_name.upper() else ".3f"
 
@@ -89,9 +96,8 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
     print("  Direction:", direction)
     print(f"  TP Pip Difference: {tp_pips:.2f} pips")
     print(f"  SL Pip Difference: {sl_pips:.2f} pips")
+    print(f"  Risk-Reward Ratio: {risk_reward_display}")
 
-    
-    
     print(f"  Open : {open_pred:{decimal_format}}")
     print(f"  Close: {close_pred:{decimal_format}}")
     print(f"  High : {high_pred:{decimal_format}}")

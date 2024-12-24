@@ -98,10 +98,10 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
     print(f"  SL Pip Difference: {sl_pips:.2f} pips")
     print(f"  Risk-Reward Ratio: {risk_reward_display}")
 
-    print(f"  Open : {open_pred:{decimal_format}}")
-    print(f"  Close: {close_pred:{decimal_format}}")
-    print(f"  High : {high_pred:{decimal_format}}")
-    print(f"  Low  : {low_pred:{decimal_format}}")
+   # print(f"  Open : {open_pred:{decimal_format}}")
+   # print(f"  Close: {close_pred:{decimal_format}}")
+   # print(f"  High : {high_pred:{decimal_format}}")
+   # print(f"  Low  : {low_pred:{decimal_format}}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

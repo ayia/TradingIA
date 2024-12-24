@@ -22,6 +22,7 @@ var/
 wheels/
 Models/
 share/python-wheels/
+env_tf/
 *.egg-info/
 .installed.cfg
 *.egg

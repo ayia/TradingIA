@@ -79,20 +79,22 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
         "low_pred": round(low_pred, 5)
     }
 
-@app.route('/predict', methods=['POST'])
+@app.route('/predictlive', methods=['POST'])
 def predict():
     data = request.json
-    pair_name = data.get('pair_name')
+    pair_names = data.get('pair_names')  # Note: Expecting a list of pair names
 
-    if not pair_name:
-        return jsonify({"error": "Missing 'pair_name' in the request body"}), 400
+    if not pair_names or not isinstance(pair_names, list):
+        return jsonify({"error": "Missing or invalid 'pair_names' in the request body. Expected a list of pair names."}), 400
 
+    results = []
     try:
-        result = predict_next_bar(pair_name)
-        return jsonify(result)
+        for pair_name in pair_names:
+            prediction = predict_next_bar(pair_name)  # Call your existing function
+            results.append(prediction)  # Append the prediction to the list
+        return jsonify(results)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        return jsonify({"error": str(e)}), 500     
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=True, host='0.0.0.0', port=port)

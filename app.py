@@ -146,10 +146,18 @@ def predict():
     try:
         for pair_name in pair_names:
             prediction = predict_next_bar(pair_name)  # Call your existing function
-            results.append(prediction)  # Append the prediction to the list
+            
+            # Extract the numeric risk/reward ratio
+            risk_reward = float(prediction['risk_reward_ratio'].split(':')[1])
+            
+            # Filter based on the condition risk/reward > 2
+            if risk_reward > 2:
+                results.append(prediction)
+                
         return jsonify(results)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500     
+        return jsonify({"error": str(e)}), 500
+        
 @app.route('/predictfromjson', methods=['POST'])
 def predict_from_json():
     data = request.json

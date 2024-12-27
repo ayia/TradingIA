@@ -151,7 +151,7 @@ def predict():
             risk_reward = float(prediction['risk_reward_ratio'].split(':')[1])
             
             # Filter based on the condition risk/reward > 2
-            if risk_reward > 2:
+            if risk_reward < 1:
                 results.append(prediction)
                 
         return jsonify(results)

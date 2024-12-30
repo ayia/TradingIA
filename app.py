@@ -145,6 +145,35 @@ def predict_next_bar_from_json(pair_name, json_data, models_root="Models", windo
     open_pred, close_pred, high_pred, low_pred = map(float, pred[0])  # Convert to Python float
     direction = "Buy" if close_pred > open_pred else "Sell"
 
+    # Validation based on Bollinger Bands
+    latest_row = df.iloc[-1]
+    bollinger_high = latest_row['bollinger_High']
+    bollinger_low = latest_row['bollinger_Low']
+
+    if not (bollinger_low <= close_pred <= bollinger_high):
+        return {
+            "error": f"Prediction for {pair_name} is outside Bollinger Bands",
+            "close_pred": round(close_pred, 5),
+            "bollinger_high": round(bollinger_high, 5),
+            "bollinger_low": round(bollinger_low, 5),
+        }
+
+    # Validation based on MACD Cross
+    macd = latest_row['macd']
+    macd_signal = latest_row['macD_Signal']
+
+    if direction == "Buy" and macd <= macd_signal:
+        return {"error": f"MACD validation failed for Buy signal on {pair_name}"}
+    if direction == "Sell" and macd >= macd_signal:
+        return {"error": f"MACD validation failed for Sell signal on {pair_name}"}
+
+    # Validation based on RSI
+    rsi = latest_row['rsi']
+    if direction == "Buy" and rsi > 70:
+        return {"error": f"RSI indicates overbought conditions for Buy on {pair_name}"}
+    if direction == "Sell" and rsi < 30:
+        return {"error": f"RSI indicates oversold conditions for Sell on {pair_name}"}
+
     tp_pips = float(calculate_pips(open_pred, close_pred, pair_name))  # Convert to Python float
     if direction == "Buy":
         sl_pips = float(calculate_pips(open_pred, low_pred, pair_name))
@@ -210,10 +239,14 @@ def predict_from_json():
     try:
         # Call the prediction logic with the provided JSON data
         result = predict_next_bar_from_json(pair_name, json_data)
+
+        # Exclude predictions that contain validation errors
+        if "error" in result:
+            return jsonify({"message": f"Prediction for {pair_name} did not meet validation criteria.", "error": result["error"]}), 200
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 
 if __name__ == '__main__':

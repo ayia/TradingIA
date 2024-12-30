@@ -25,6 +25,7 @@ def fetch_data(pair_name):
 def calculate_pips(price1, price2, pair_name):
     multiplier = 100 if "JPY" in pair_name.upper() else 10000
     return abs(price1 - price2) * multiplier
+
 def predict_next_bar(pair_name, models_root="Models", window_size=10):
     json_data = fetch_data(pair_name)
 
@@ -59,6 +60,35 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
     open_pred, close_pred, high_pred, low_pred = map(float, pred[0])  # Convert to Python float
     direction = "Buy" if close_pred > open_pred else "Sell"
 
+    # Validation based on Bollinger Bands
+    latest_row = df.iloc[-1]
+    bollinger_high = latest_row['bollinger_High']
+    bollinger_low = latest_row['bollinger_Low']
+
+    if not (bollinger_low <= close_pred <= bollinger_high):
+        return {
+            "error": f"Prediction for {pair_name} is outside Bollinger Bands",
+            "close_pred": round(close_pred, 5),
+            "bollinger_high": round(bollinger_high, 5),
+            "bollinger_low": round(bollinger_low, 5),
+        }
+
+    # Validation based on MACD Cross
+    macd = latest_row['macd']
+    macd_signal = latest_row['macD_Signal']
+
+    if direction == "Buy" and macd <= macd_signal:
+        return {"error": f"MACD validation failed for Buy signal on {pair_name}"}
+    if direction == "Sell" and macd >= macd_signal:
+        return {"error": f"MACD validation failed for Sell signal on {pair_name}"}
+
+    # Validation based on RSI
+    rsi = latest_row['rsi']
+    if direction == "Buy" and rsi > 70:
+        return {"error": f"RSI indicates overbought conditions for Buy on {pair_name}"}
+    if direction == "Sell" and rsi < 30:
+        return {"error": f"RSI indicates oversold conditions for Sell on {pair_name}"}
+
     tp_pips = float(calculate_pips(open_pred, close_pred, pair_name))  # Convert to Python float
     if direction == "Buy":
         sl_pips = float(calculate_pips(open_pred, low_pred, pair_name))
@@ -78,6 +108,7 @@ def predict_next_bar(pair_name, models_root="Models", window_size=10):
         "high_pred": round(high_pred, 5),
         "low_pred": round(low_pred, 5)
     }
+
 def predict_next_bar_from_json(pair_name, json_data, models_root="Models", window_size=10):
     model_path = os.path.join(models_root, pair_name, "my_lstm_model.h5")
     scaler_features_path = os.path.join(models_root, pair_name, "scaler_features.pkl")
@@ -146,18 +177,25 @@ def predict():
     try:
         for pair_name in pair_names:
             prediction = predict_next_bar(pair_name)  # Call your existing function
-            
+
+            # Skip predictions with validation errors
+            if "error" in prediction:
+                continue
+
             # Extract the numeric risk/reward ratio
             risk_reward = float(prediction['risk_reward_ratio'].split(':')[1])
             
             # Filter based on the condition risk/reward > 2
-            if risk_reward < 1:
+            if risk_reward > 1:
                 results.append(prediction)
                 
+        if not results:
+            return jsonify({"message": "No valid predictions met the conditions."}), 200
+        
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-        
+       
 @app.route('/predictfromjson', methods=['POST'])
 def predict_from_json():
     data = request.json

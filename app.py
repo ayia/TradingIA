@@ -20,6 +20,39 @@ rename_map = {
     "macD_Diff": "MACD_Diff"
 }
 
+# Function to infer market direction based on indicators
+def infer_market_direction(row):
+    directions = []
+
+    # EMA Cross
+    if row['EMA_20'] > row['EMA_50']:
+        directions.append("Buy")
+    elif row['EMA_20'] < row['EMA_50']:
+        directions.append("Sell")
+
+    # MACD
+    if row['MACD'] > row['MACD_Signal']:
+        directions.append("Buy")
+    elif row['MACD'] < row['MACD_Signal']:
+        directions.append("Sell")
+
+    # RSI
+    if row['RSI'] > 70:
+        directions.append("Sell")  # Overbought
+    elif row['RSI'] < 30:
+        directions.append("Buy")  # Oversold
+
+    # Majority vote
+    buy_votes = directions.count("Buy")
+    sell_votes = directions.count("Sell")
+
+    if buy_votes > sell_votes:
+        return "Buy"
+    elif sell_votes > buy_votes:
+        return "Sell"
+    else:
+        return "Neutral"
+
 # Function to calculate technical indicators
 def calculate_indicators(df):
     logging.info(f"Starting indicator calculation. Initial rows: {len(df)}")
@@ -28,18 +61,21 @@ def calculate_indicators(df):
         return pd.DataFrame()  # Return an empty DataFrame if not enough rows
 
     try:
+        # Bollinger Bands
         df['bollinger_Middle'] = df['close'].rolling(window=20).mean()
         df['bollinger_Std'] = df['close'].rolling(window=20).std()
         df['bollinger_High'] = df['bollinger_Middle'] + (df['bollinger_Std'] * 2)
         df['bollinger_Low'] = df['bollinger_Middle'] - (df['bollinger_Std'] * 2)
 
+        # Moving Averages
         df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
 
+        # MACD
         df['MACD'] = df['EMA_20'] - df['EMA_50']
         df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['MACD_Diff'] = df['MACD'] - df['MACD_Signal']
 
+        # RSI
         delta = df['close'].diff(1)
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
@@ -48,10 +84,14 @@ def calculate_indicators(df):
         rs = avg_gain / avg_loss
         df['RSI'] = 100 - (100 / (1 + rs))
 
+        # ATR
         df['Prev_Close'] = df['close'].shift(1)
         df['TR'] = df.apply(lambda row: max(row['high'] - row['low'], abs(row['high'] - row['Prev_Close']), abs(row['low'] - row['Prev_Close'])), axis=1)
         df['ATR'] = df['TR'].rolling(window=14).mean()
         df.drop(columns=['Prev_Close', 'TR'], inplace=True, errors='ignore')
+
+        # Infer market direction based on indicators
+        df['indicator_direction'] = df.apply(lambda row: infer_market_direction(row), axis=1)
 
         df.dropna(inplace=True)
         logging.info(f"Finished indicator calculation. Remaining rows: {len(df)}")
@@ -155,9 +195,15 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
     else:
         risk_reward = "Undefined"
 
+    # Compare predicted direction with indicator direction
+    indicator_direction = df['indicator_direction'].iloc[-1]
+    if direction != indicator_direction:
+        return {"pair_name": pair_name, "error": "Mismatch between prediction and indicators"}
+
     return {
         "pair_name": pair_name,
         "direction": direction,
+        "indicator_direction": indicator_direction,
         "open_pred": round(open_pred, 5),
         "close_pred": round(close_pred, 5),
         "high_pred": round(high_pred, 5),
@@ -181,10 +227,10 @@ def predict():
             json_data = fetch_data(pair_name)
             prediction = predict_next_bar(pair_name, json_data)
 
-            # Filter by risk-reward ratio >= 1
-            if "risk_reward" in prediction and ":" in prediction["risk_reward"]:
+            # Add to results only if there's no error and risk-reward >= 1
+            if "error" not in prediction and "risk_reward" in prediction and ":" in prediction["risk_reward"]:
                 risk, reward = map(float, prediction["risk_reward"].split(":"))
-                if reward >= 3:
+                if reward >= 1:
                     results.append(prediction)
         except Exception as e:
             logging.error(f"Error processing {pair_name}: {e}")

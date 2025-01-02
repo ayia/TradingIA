@@ -119,11 +119,6 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
         "open", "close", "high", "low", "volume"
     ]
 
-    missing_cols = [col for col in feature_cols if col not in df.columns]
-    if missing_cols:
-        logging.error(f"Missing columns for {pair_name}: {', '.join(missing_cols)}")
-        return {"pair_name": pair_name, "error": f"Missing columns: {', '.join(missing_cols)}"}
-
     if len(df) < window_size:
         logging.error(f"Not enough data after preprocessing for prediction. Required: {window_size}, Found: {len(df)}")
         return {"pair_name": pair_name, "error": f"Not enough data for prediction. Required: {window_size}, Found: {len(df)}"}
@@ -143,48 +138,22 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
     open_pred, close_pred, high_pred, low_pred = map(float, pred[0])
     direction = "Buy" if close_pred > open_pred else "Sell"
 
-    # Validate prediction direction with indicators
-    latest_row = df.iloc[-1]  # Get the last row of processed data
+    # Determine pips multiplier based on currency pair
+    pips_multiplier = 100 if "JPY" in pair_name else 10000
 
-    if not (latest_row['bollinger_Low'] <= close_pred <= latest_row['bollinger_High']):
-        return {
-            "pair_name": pair_name,
-            "error": f"Prediction outside Bollinger Bands for {pair_name}",
-            "predicted_direction": direction,
-            "indicators_suggestion": "Invalid Bollinger Band alignment"
-        }
+    # Calculate TP and SL pips
+    tp_pips = abs(close_pred - open_pred) * pips_multiplier
+    if direction == "Buy":
+        sl_pips = abs(open_pred - low_pred) * pips_multiplier
+    else:  # direction == "Sell"
+        sl_pips = abs(high_pred - open_pred) * pips_multiplier
 
-    if direction == "Buy" and latest_row['MACD'] <= latest_row['MACD_Signal']:
-        return {
-            "pair_name": pair_name,
-            "error": f"MACD validation failed for Buy on {pair_name}",
-            "predicted_direction": direction,
-            "indicators_suggestion": "MACD does not confirm Buy"
-        }
-
-    if direction == "Sell" and latest_row['MACD'] >= latest_row['MACD_Signal']:
-        return {
-            "pair_name": pair_name,
-            "error": f"MACD validation failed for Sell on {pair_name}",
-            "predicted_direction": direction,
-            "indicators_suggestion": "MACD does not confirm Sell"
-        }
-
-    if direction == "Buy" and latest_row['RSI'] > 70:
-        return {
-            "pair_name": pair_name,
-            "error": f"RSI indicates overbought for Buy on {pair_name}",
-            "predicted_direction": direction,
-            "indicators_suggestion": "RSI does not confirm Buy"
-        }
-
-    if direction == "Sell" and latest_row['RSI'] < 30:
-        return {
-            "pair_name": pair_name,
-            "error": f"RSI indicates oversold for Sell on {pair_name}",
-            "predicted_direction": direction,
-            "indicators_suggestion": "RSI does not confirm Sell"
-        }
+    # Calculate risk-reward ratio
+    if sl_pips > 0:  # Avoid division by zero
+        reward_ratio = tp_pips / sl_pips
+        risk_reward = f"1:{round(reward_ratio, 2)}"
+    else:
+        risk_reward = "Undefined"
 
     return {
         "pair_name": pair_name,
@@ -192,7 +161,10 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
         "open_pred": round(open_pred, 5),
         "close_pred": round(close_pred, 5),
         "high_pred": round(high_pred, 5),
-        "low_pred": round(low_pred, 5)
+        "low_pred": round(low_pred, 5),
+        "tp_pips": round(tp_pips, 2),
+        "sl_pips": round(sl_pips, 2),
+        "risk_reward": risk_reward
     }
 
 @app.route('/predict', methods=['POST'])
@@ -208,10 +180,12 @@ def predict():
         try:
             json_data = fetch_data(pair_name)
             prediction = predict_next_bar(pair_name, json_data)
-            
-            # Add only matched predictions
-            if "error" not in prediction:
-                results.append(prediction)
+
+            # Filter by risk-reward ratio >= 1
+            if "risk_reward" in prediction and ":" in prediction["risk_reward"]:
+                risk, reward = map(float, prediction["risk_reward"].split(":"))
+                if reward >= 3:
+                    results.append(prediction)
         except Exception as e:
             logging.error(f"Error processing {pair_name}: {e}")
 
@@ -219,6 +193,8 @@ def predict():
         return jsonify({"message": "No valid predictions met the conditions."}), 200
 
     return jsonify(results)
+
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
     app.run(debug=True, host='0.0.0.0', port=port)

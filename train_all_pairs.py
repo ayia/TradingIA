@@ -1,44 +1,35 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+import tensorflow as tf
+import logging
 import glob
 import pandas as pd
 import numpy as np
 import joblib
 from sklearn.preprocessing import MinMaxScaler
-
-# ---- Import des callbacks Keras pour gérer l'overfitting ----
+from sklearn.metrics import mean_absolute_error, r2_score
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import Input, LSTM, Dropout, Dense
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-
+from concurrent.futures import ThreadPoolExecutor
 import matplotlib.pyplot as plt
 
-def train_lstm_for_file(json_file_path, models_root="Models", window_size=10, horizon=1, epochs=20):
-    """
-    Entraîne un modèle LSTM pour un fichier JSON donné.
-    Enregistre le modèle et les scalers dans un sous-dossier de 'models_root'.
-    """
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
-    # --------------------------------------------------------
-    # 1) Récupérer le nom de la paire à partir du nom de fichier
-    # --------------------------------------------------------
+def train_lstm_for_file(json_file_path, models_root="Models", window_size=10, horizon=1, epochs=200):
     pair_name = os.path.splitext(os.path.basename(json_file_path))[0]
-    print(f"\n[INFO] Traitement du fichier : {json_file_path}, pair = {pair_name}")
+    print(f"\n[INFO] Processing file: {json_file_path}, pair = {pair_name}")
 
-    # --------------------------------------------------------
-    # 2) Charger les données depuis le JSON
-    # --------------------------------------------------------
+    # Load and preprocess data
     df = pd.read_json(json_file_path)
-
-    # --------------------------------------------------------
-    # 3) Préparer la série temporelle
-    # --------------------------------------------------------
     df['DateTime'] = pd.to_datetime(df['DateTime'])
     df.sort_values(by='DateTime', inplace=True)
     df.reset_index(drop=True, inplace=True)
 
     feature_cols = [
-        "SMA_20", "SMA_50", "EMA_20", "EMA_50", 
+        "SMA_20", "SMA_50", "EMA_20", "EMA_50",
         "RSI", "MACD", "MACD_Signal", "MACD_Diff",
         "Bollinger_High", "Bollinger_Low", "ATR",
         "Open", "Close", "High", "Low", "Volume"
@@ -46,123 +37,110 @@ def train_lstm_for_file(json_file_path, models_root="Models", window_size=10, ho
     target_cols = ["Open", "Close", "High", "Low"]
 
     feature_data = df[feature_cols].values
-    target_data  = df[target_cols].values
+    target_data = df[target_cols].values
 
-    # Normalisation
+    # Scaling
     scaler_features = MinMaxScaler()
     feature_data_scaled = scaler_features.fit_transform(feature_data)
 
     scaler_target = MinMaxScaler()
     target_data_scaled = scaler_target.fit_transform(target_data)
 
-    # --------------------------------------------------------
-    # 4) Création des séquences (fenêtres glissantes)
-    # --------------------------------------------------------
+    # Generate sequences
     X, Y = [], []
     for i in range(len(df) - window_size - horizon + 1):
-        seq_x = feature_data_scaled[i : i + window_size]
-        seq_y = target_data_scaled[i + window_size : i + window_size + horizon]
+        seq_x = feature_data_scaled[i:i + window_size]
+        seq_y = target_data_scaled[i + window_size:i + window_size + horizon]
         X.append(seq_x)
-        Y.append(seq_y[0])  # (4,)
+        Y.append(seq_y[0])
 
     X = np.array(X)
     Y = np.array(Y)
 
     if len(X) == 0:
-        print(f"[WARNING] Pas assez de données pour créer des séquences pour {pair_name}.")
+        print(f"[WARNING] Not enough data for sequences for {pair_name}.")
         return
 
-    print(f"[INFO] {pair_name} : X shape = {X.shape}, Y shape = {Y.shape}")
-
-    # --------------------------------------------------------
-    # 5) Split Train/Test
-    # --------------------------------------------------------
+    # Train/test split
     train_size = int(0.8 * len(X))
     X_train, X_test = X[:train_size], X[train_size:]
     Y_train, Y_test = Y[:train_size], Y[train_size:]
 
-    # --------------------------------------------------------
-    # 6) Construction du modèle LSTM
-    # --------------------------------------------------------
-    model = Sequential()
-    model.add(LSTM(64, input_shape=(window_size, X.shape[2]), return_sequences=False))
-    model.add(Dropout(0.3))   # Augmentation du dropout
-    model.add(Dense(32, activation='relu'))
-    model.add(Dense(4, activation='linear'))  # 4 sorties : Open, Close, High, Low
+    # Model architecture
+    model = Sequential([
+        Input(shape=(window_size, X.shape[2])),
+        LSTM(64, return_sequences=True),
+        Dropout(0.3),
+        LSTM(32, return_sequences=False),
+        Dense(16, activation='relu'),
+        Dense(4, activation='linear')
+    ])
 
     model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
 
-    # Callbacks pour stopper ou réduire le LR en cas de surapprentissage
     callbacks = [
         EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
         ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
     ]
 
-    # --------------------------------------------------------
-    # 7) Entraînement
-    # --------------------------------------------------------
+    # Train the model
     history = model.fit(
-        X_train, Y_train,
-        epochs=epochs,
-        batch_size=32,
-        validation_split=0.2,
-        shuffle=True,              # shuffle=True pour réduire le risque de surapprentissage
-        callbacks=callbacks
+        X_train, Y_train, epochs=epochs, batch_size=32,
+        validation_split=0.2, shuffle=True, callbacks=callbacks, verbose=0
     )
 
-    # --------------------------------------------------------
-    # 8) Évaluation
-    # --------------------------------------------------------
-    test_loss = model.evaluate(X_test, Y_test)
-    print(f"[INFO] {pair_name} - Test MSE: {test_loss:.6f}")
+    # Evaluate the model
+    Y_test_pred = model.predict(X_test)
+    test_loss = model.evaluate(X_test, Y_test, verbose=0)
+    mae = mean_absolute_error(Y_test, Y_test_pred)
+    r2 = r2_score(Y_test, Y_test_pred)
 
-    # --------------------------------------------------------
-    # 9) Sauvegarde du modèle et des scalers
-    # --------------------------------------------------------
+    print(f"[INFO] Test loss for {pair_name}: {test_loss}")
+    print(f"[INFO] Test MAE for {pair_name}: {mae}")
+    print(f"[INFO] Test R² for {pair_name}: {r2}")
+
+    # Save the model and scalers
     output_dir = os.path.join(models_root, pair_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    model_path = os.path.join(output_dir, "my_lstm_model.h5")
+    model_path = os.path.join(output_dir, "my_lstm_model.keras")
     scaler_features_path = os.path.join(output_dir, "scaler_features.pkl")
-    scaler_target_path   = os.path.join(output_dir, "scaler_target.pkl")
+    scaler_target_path = os.path.join(output_dir, "scaler_target.pkl")
 
     model.save(model_path)
     joblib.dump(scaler_features, scaler_features_path)
-    joblib.dump(scaler_target,   scaler_target_path)
+    joblib.dump(scaler_target, scaler_target_path)
 
-    print(f"[INFO] Modèle sauvegardé dans : {model_path}")
-    print(f"[INFO] Scalers sauvegardés dans : {scaler_features_path}, {scaler_target_path}")
+    print(f"[INFO] Model saved at: {model_path}")
+    print(f"[INFO] Scalers saved at: {scaler_features_path}, {scaler_target_path}")
 
-    # Affichage de la courbe de perte
-    plt.figure(figsize=(8,4))
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Val Loss')
-    plt.title(f"{pair_name} - Courbe d'apprentissage")
+    # Visualize predictions
+    plt.figure(figsize=(10, 6))
+    plt.plot(Y_test[:, 0], label="Actual Open", alpha=0.7)
+    plt.plot(Y_test_pred[:, 0], label="Predicted Open", alpha=0.7)
+    plt.title(f"{pair_name} Predictions")
     plt.legend()
-    plt.savefig(os.path.join(output_dir, f"{pair_name}_learning_curve.png"))
-    plt.close()
+    plt.show()
 
 def main():
-    """
-    Parcours tous les .json dans le dossier 'training.Data' et entraîne un modèle LSTM 
-    pour chaque fichier. Les modèles sont sauvegardés dans 'Models/pair_name'.
-    """
-    input_folder = "training.Data"  
-    models_root = "Models"      
-
+    input_folder = "training.Data"
+    models_root = "Models"
     json_files = glob.glob(os.path.join(input_folder, "*.json"))
     
     if not json_files:
-        print("[ERROR] Aucun fichier .json trouvé dans le dossier 'training.Data'.")
+        print("[ERROR] No .json files found in the 'training.Data' folder.")
         return
 
-    for json_file_path in json_files:
-        train_lstm_for_file(
-            json_file_path=json_file_path, 
-            models_root=models_root,
-            window_size=10,
-            horizon=1,
-            epochs=200
+    with ThreadPoolExecutor() as executor:
+        executor.map(
+            lambda json_file: train_lstm_for_file(
+                json_file_path=json_file, 
+                models_root=models_root,
+                window_size=10,
+                horizon=1,
+                epochs=200
+            ),
+            json_files
         )
 
 if __name__ == "__main__":

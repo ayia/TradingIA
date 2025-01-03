@@ -10,7 +10,6 @@ import logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Define the rename map for incorrect column casing
 rename_map = {
     "smA_20": "SMA_20",
     "smA_50": "SMA_50",
@@ -20,62 +19,31 @@ rename_map = {
     "macD_Diff": "MACD_Diff"
 }
 
-# Function to infer market direction based on indicators
+# Nouvelle stratégie avec continuation pour détection de tendance
 def infer_market_direction(row):
-    directions = []
-
-    # EMA Cross
-    if row['EMA_20'] > row['EMA_50']:
-        directions.append("Buy")
-    elif row['EMA_20'] < row['EMA_50']:
-        directions.append("Sell")
-
-    # MACD
-    if row['MACD'] > row['MACD_Signal']:
-        directions.append("Buy")
-    elif row['MACD'] < row['MACD_Signal']:
-        directions.append("Sell")
-
-    # RSI
-    if row['RSI'] > 70:
-        directions.append("Sell")  # Overbought
-    elif row['RSI'] < 30:
-        directions.append("Buy")  # Oversold
-
-    # Majority vote
-    buy_votes = directions.count("Buy")
-    sell_votes = directions.count("Sell")
-
-    if buy_votes > sell_votes:
+    if row['MACD'] > row['MACD_Signal'] and row['MACD'] > 0 and row['RSI'] > 50:
         return "Buy"
-    elif sell_votes > buy_votes:
+    elif row['MACD'] < row['MACD_Signal'] and row['MACD'] < 0 and row['RSI'] < 50:
         return "Sell"
     else:
         return "Neutral"
 
-# Function to calculate technical indicators
 def calculate_indicators(df):
-    logging.info(f"Starting indicator calculation. Initial rows: {len(df)}")
-    if len(df) < 20:
-        logging.error("Insufficient rows for indicator calculation. Skipping.")
-        return pd.DataFrame()  # Return an empty DataFrame if not enough rows
+    logging.info(f"Début du calcul des indicateurs. Nombre initial de lignes : {len(df)}")
+    if len(df) < 50:
+        logging.error("Nombre insuffisant de lignes pour le calcul des indicateurs.")
+        return pd.DataFrame()
 
     try:
-        # Bollinger Bands
-        df['bollinger_Middle'] = df['close'].rolling(window=20).mean()
-        df['bollinger_Std'] = df['close'].rolling(window=20).std()
-        df['bollinger_High'] = df['bollinger_Middle'] + (df['bollinger_Std'] * 2)
-        df['bollinger_Low'] = df['bollinger_Middle'] - (df['bollinger_Std'] * 2)
-
-        # Moving Averages
+        # Calcul des moyennes mobiles exponentielles
         df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
 
-        # MACD
+        # Calcul du MACD
         df['MACD'] = df['EMA_20'] - df['EMA_50']
         df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
 
-        # RSI
+        # Calcul du RSI
         delta = df['close'].diff(1)
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
@@ -84,35 +52,36 @@ def calculate_indicators(df):
         rs = avg_gain / avg_loss
         df['RSI'] = 100 - (100 / (1 + rs))
 
-        # ATR
+        # Calcul de l'ATR
         df['Prev_Close'] = df['close'].shift(1)
-        df['TR'] = df.apply(lambda row: max(row['high'] - row['low'], abs(row['high'] - row['Prev_Close']), abs(row['low'] - row['Prev_Close'])), axis=1)
+        df['TR'] = df.apply(lambda row: max(row['high'] - row['low'],
+                                            abs(row['high'] - row['Prev_Close']),
+                                            abs(row['low'] - row['Prev_Close'])), axis=1)
         df['ATR'] = df['TR'].rolling(window=14).mean()
-        df.drop(columns=['Prev_Close', 'TR'], inplace=True, errors='ignore')
 
-        # Infer market direction based on indicators
+        # Détection de direction
         df['indicator_direction'] = df.apply(lambda row: infer_market_direction(row), axis=1)
 
+        # Supprimer les colonnes inutilisées après utilisation
+        df.drop(columns=['Prev_Close', 'TR'], inplace=True, errors='ignore')
         df.dropna(inplace=True)
-        logging.info(f"Finished indicator calculation. Remaining rows: {len(df)}")
+        logging.info(f"Calcul des indicateurs terminé. Lignes restantes : {len(df)}")
     except Exception as e:
-        logging.error(f"Error during indicator calculation: {e}")
+        logging.error(f"Erreur lors du calcul des indicateurs : {e}")
         return pd.DataFrame()
 
     return df
 
-# Function to fetch data from the correct URL
+
 def fetch_data(pair_name):
-    url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour&barsnumber=30"
+    url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour&barsnumber=200"
     try:
         response = requests.get(url, headers={"accept": "text/plain"})
         response.raise_for_status()
-        json_data = response.json()
-        logging.info(f"API response for {pair_name}: {json_data}")
-        return json_data
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching data for {pair_name}: {e}")
-        raise Exception(f"Data fetching failed for {pair_name}")
+        logging.error(f"Erreur lors de la récupération des données pour {pair_name} : {e}")
+        raise Exception(f"Échec de la récupération des données pour {pair_name}")
 
 # Function for predictions with validation
 def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10):
@@ -196,14 +165,14 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
         risk_reward = "Undefined"
 
     # Compare predicted direction with indicator direction
-    indicator_direction = df['indicator_direction'].iloc[-1]
-    if direction != indicator_direction:
-        return {"pair_name": pair_name, "error": "Mismatch between prediction and indicators"}
+   # indicator_direction = df['indicator_direction'].iloc[-1]
+   # if direction != indicator_direction:
+   #     return {"pair_name": pair_name, "error": "Mismatch between prediction and indicators"}
 
     return {
         "pair_name": pair_name,
         "direction": direction,
-        "indicator_direction": indicator_direction,
+        # "indicator_direction": indicator_direction,
         "open_pred": round(open_pred, 5),
         "close_pred": round(close_pred, 5),
         "high_pred": round(high_pred, 5),
@@ -212,58 +181,47 @@ def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10)
         "sl_pips": round(sl_pips, 2),
         "risk_reward": risk_reward
     }
-
 @app.route('/predict', methods=['POST'])
 def predict():
-   # Liste codée en dur des paires de devises
     pair_names = [
         "AUDJPY", "AUDUSD", "CHFJPY", "EURCAD", "EURCHF", "EURGBP", "EURJPY", 
         "EURUSD", "GBPCHF", "GBPJPY", "GBPUSD", "NZDJPY", "NZDUSD", "USDCAD", 
         "USDCHF", "USDJPY", "AUDCAD", "AUDCHF", "AUDNZD", "CADCHF", "CADJPY", 
         "EURAUD", "EURNZD", "GBPAUD", "GBPCAD", "GBPNZD", "NZDCAD", "NZDCHF"
     ]
-
     results = []
     for pair_name in pair_names:
         try:
             json_data = fetch_data(pair_name)
             prediction = predict_next_bar(pair_name, json_data)
-
-            # Add to results only if there's no error and risk-reward >= 1
-            if "error" not in prediction and "risk_reward" in prediction and ":" in prediction["risk_reward"]:
+            if "error" not in prediction and ":" in prediction.get("risk_reward", ""):
                 risk, reward = map(float, prediction["risk_reward"].split(":"))
-                if reward >= 1:
+                if (reward >= 2 and reward < 5):
+                    prediction["reward"] = reward  # Add reward to the prediction dict for sorting
                     results.append(prediction)
         except Exception as e:
-            logging.error(f"Error processing {pair_name}: {e}")
+            logging.error(f"Erreur pour {pair_name} : {e}")
 
     if not results:
-        return jsonify({"message": "No valid predictions met the conditions."}), 200
+        return jsonify({"message": "Aucune prédiction valide."}), 200
+
+    # Sort the results by reward in descending order
+    results = sorted(results, key=lambda x: x["reward"], reverse=True)
 
     return jsonify(results)
 
 @app.route('/predictCtreader', methods=['POST'])
 def predictCtreader():
-    # Appel de la méthode `predict` pour récupérer les résultats
     response = predict()
     if isinstance(response, tuple):
-        # Si une erreur survient dans `predict`, elle retourne un tuple (message, code HTTP)
         return response[0], response[1]
-
-    # Récupération des résultats sous forme de liste JSON
     results = response.json if hasattr(response, 'json') else response
-
     if "message" in results:
-        # Pas de prédictions valides
         return "No valid predictions met the conditions."
-
-    # Construction de la chaîne formatée
     formatted_results = [
         f"{result['pair_name']}|{result['direction']}|{result['tp_pips']}|{result['sl_pips']}"
         for result in results
     ]
-
-    # Retourne les résultats séparés par '@'
     return "@".join(formatted_results)
 
 if __name__ == '__main__':

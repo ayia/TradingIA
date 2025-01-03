@@ -5,179 +5,267 @@ import numpy as np
 import pandas as pd
 import requests
 from tensorflow.keras.models import load_model
-import tensorflow as tf
 import logging
 
-# Suppress TensorFlow logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-tf.get_logger().setLevel(logging.ERROR)
-logging.getLogger('tensorflow').setLevel(logging.ERROR)
-logging.getLogger('absl').setLevel(logging.ERROR)
-
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
-def fetch_data(pair_name):
-    url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/Lats10IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour"
-    response = requests.get(url, headers={"accept": "text/plain"})
-    response.raise_for_status()
-    return response.json()
+# Define the rename map for incorrect column casing
+rename_map = {
+    "smA_20": "SMA_20",
+    "smA_50": "SMA_50",
+    "emA_20": "EMA_20",
+    "emA_50": "EMA_50",
+    "macD_Signal": "MACD_Signal",
+    "macD_Diff": "MACD_Diff"
+}
 
-def calculate_pips(price1, price2, pair_name):
-    multiplier = 100 if "JPY" in pair_name.upper() else 10000
-    return abs(price1 - price2) * multiplier
-def predict_next_bar(pair_name, models_root="Models", window_size=10):
-    json_data = fetch_data(pair_name)
+# Function to infer market direction based on indicators
+def infer_market_direction(row):
+    directions = []
 
-    model_path = os.path.join(models_root, pair_name, "my_lstm_model.h5")
-    scaler_features_path = os.path.join(models_root, pair_name, "scaler_features.pkl")
-    scaler_target_path = os.path.join(models_root, pair_name, "scaler_target.pkl")
+    # EMA Cross
+    if row['EMA_20'] > row['EMA_50']:
+        directions.append("Buy")
+    elif row['EMA_20'] < row['EMA_50']:
+        directions.append("Sell")
 
-    model = load_model(model_path)
-    scaler_features = joblib.load(scaler_features_path)
-    scaler_target = joblib.load(scaler_target_path)
+    # MACD
+    if row['MACD'] > row['MACD_Signal']:
+        directions.append("Buy")
+    elif row['MACD'] < row['MACD_Signal']:
+        directions.append("Sell")
 
-    df = pd.DataFrame(json_data)
-    df['dateTime'] = pd.to_datetime(df['dateTime'])
-    df.sort_values(by='dateTime', inplace=True)
-    df.reset_index(drop=True, inplace=True)
+    # RSI
+    if row['RSI'] > 70:
+        directions.append("Sell")  # Overbought
+    elif row['RSI'] < 30:
+        directions.append("Buy")  # Oversold
 
-    feature_cols = [
-        "smA_20", "smA_50", "emA_20", "emA_50",
-        "rsi", "macd", "macD_Signal", "macD_Diff",
-        "bollinger_High", "bollinger_Low", "atr",
-        "open", "close", "high", "low", "volume"
-    ]
-    target_cols = ["open", "close", "high", "low"]
+    # Majority vote
+    buy_votes = directions.count("Buy")
+    sell_votes = directions.count("Sell")
 
-    feature_data = df[feature_cols].values
-    feature_data_scaled = scaler_features.transform(feature_data)
-
-    seq_x = np.array([feature_data_scaled[-window_size:]])
-    pred_scaled = model.predict(seq_x)
-    pred = scaler_target.inverse_transform(pred_scaled)
-
-    open_pred, close_pred, high_pred, low_pred = map(float, pred[0])  # Convert to Python float
-    direction = "Buy" if close_pred > open_pred else "Sell"
-
-    tp_pips = float(calculate_pips(open_pred, close_pred, pair_name))  # Convert to Python float
-    if direction == "Buy":
-        sl_pips = float(calculate_pips(open_pred, low_pred, pair_name))
+    if buy_votes > sell_votes:
+        return "Buy"
+    elif sell_votes > buy_votes:
+        return "Sell"
     else:
-        sl_pips = float(calculate_pips(open_pred, high_pred, pair_name))
+        return "Neutral"
 
-    risk_reward_ratio = tp_pips / sl_pips if sl_pips > 0 else None
+# Function to calculate technical indicators
+def calculate_indicators(df):
+    logging.info(f"Starting indicator calculation. Initial rows: {len(df)}")
+    if len(df) < 20:
+        logging.error("Insufficient rows for indicator calculation. Skipping.")
+        return pd.DataFrame()  # Return an empty DataFrame if not enough rows
 
-    return {
-        "pair_name": pair_name,
-        "direction": direction,
-        "tp_pips": round(tp_pips, 2),
-        "sl_pips": round(sl_pips, 2),
-        "risk_reward_ratio": f"1:{round(risk_reward_ratio, 2)}" if risk_reward_ratio else "Undefined",
-        "open_pred": round(open_pred, 5),
-        "close_pred": round(close_pred, 5),
-        "high_pred": round(high_pred, 5),
-        "low_pred": round(low_pred, 5)
-    }
-def predict_next_bar_from_json(pair_name, json_data, models_root="Models", window_size=10):
-    model_path = os.path.join(models_root, pair_name, "my_lstm_model.h5")
+    try:
+        # Bollinger Bands
+        df['bollinger_Middle'] = df['close'].rolling(window=20).mean()
+        df['bollinger_Std'] = df['close'].rolling(window=20).std()
+        df['bollinger_High'] = df['bollinger_Middle'] + (df['bollinger_Std'] * 2)
+        df['bollinger_Low'] = df['bollinger_Middle'] - (df['bollinger_Std'] * 2)
+
+        # Moving Averages
+        df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
+        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+
+        # MACD
+        df['MACD'] = df['EMA_20'] - df['EMA_50']
+        df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+
+        # RSI
+        delta = df['close'].diff(1)
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(window=14).mean()
+        avg_loss = loss.rolling(window=14).mean()
+        rs = avg_gain / avg_loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+
+        # ATR
+        df['Prev_Close'] = df['close'].shift(1)
+        df['TR'] = df.apply(lambda row: max(row['high'] - row['low'], abs(row['high'] - row['Prev_Close']), abs(row['low'] - row['Prev_Close'])), axis=1)
+        df['ATR'] = df['TR'].rolling(window=14).mean()
+        df.drop(columns=['Prev_Close', 'TR'], inplace=True, errors='ignore')
+
+        # Infer market direction based on indicators
+        df['indicator_direction'] = df.apply(lambda row: infer_market_direction(row), axis=1)
+
+        df.dropna(inplace=True)
+        logging.info(f"Finished indicator calculation. Remaining rows: {len(df)}")
+    except Exception as e:
+        logging.error(f"Error during indicator calculation: {e}")
+        return pd.DataFrame()
+
+    return df
+
+# Function to fetch data from the correct URL
+def fetch_data(pair_name):
+    url = f"https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/IndicatorsBarHistoricaldata?currencyPairs={pair_name}&interval=OneHour&barsnumber=30"
+    try:
+        response = requests.get(url, headers={"accept": "text/plain"})
+        response.raise_for_status()
+        json_data = response.json()
+        logging.info(f"API response for {pair_name}: {json_data}")
+        return json_data
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching data for {pair_name}: {e}")
+        raise Exception(f"Data fetching failed for {pair_name}")
+
+# Function for predictions with validation
+def predict_next_bar(pair_name, json_data, models_root="Models", window_size=10):
+    model_path = os.path.join(models_root, pair_name, "my_lstm_model.keras")
     scaler_features_path = os.path.join(models_root, pair_name, "scaler_features.pkl")
     scaler_target_path = os.path.join(models_root, pair_name, "scaler_target.pkl")
 
-    # Load the model and scalers
-    model = load_model(model_path)
-    scaler_features = joblib.load(scaler_features_path)
-    scaler_target = joblib.load(scaler_target_path)
+    # Load model and scalers
+    try:
+        model = load_model(model_path)
+        model.compile(optimizer='adam', loss='mean_squared_error')
+    except Exception as e:
+        logging.error(f"Model loading failed for {pair_name}: {e}")
+        return {"pair_name": pair_name, "error": f"Model not found for {pair_name}"}
+
+    try:
+        scaler_features = joblib.load(scaler_features_path)
+        scaler_target = joblib.load(scaler_target_path)
+    except Exception as e:
+        logging.error(f"Scaler loading failed for {pair_name}: {e}")
+        return {"pair_name": pair_name, "error": f"Scalers not found for {pair_name}"}
 
     # Prepare the DataFrame
     df = pd.DataFrame(json_data)
+    logging.info(f"Raw API data for {pair_name}: {df}")
+    if df.empty:
+        return {"pair_name": pair_name, "error": "No data available from API"}
+
+    df.rename(columns=rename_map, inplace=True)
     df['dateTime'] = pd.to_datetime(df['dateTime'])
     df.sort_values(by='dateTime', inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # Define feature and target columns
+    # Calculate indicators for all rows
+    df = calculate_indicators(df)
+    if df.empty:
+        logging.error(f"DataFrame is empty after indicator calculation for {pair_name}")
+        return {"pair_name": pair_name, "error": "Insufficient data after preprocessing"}
+
     feature_cols = [
-        "smA_20", "smA_50", "emA_20", "emA_50",
-        "rsi", "macd", "macD_Signal", "macD_Diff",
-        "bollinger_High", "bollinger_Low", "atr",
+        "SMA_20", "SMA_50", "EMA_20", "EMA_50",
+        "RSI", "MACD", "MACD_Signal", "MACD_Diff",
+        "bollinger_High", "bollinger_Low", "ATR",
         "open", "close", "high", "low", "volume"
     ]
-    target_cols = ["open", "close", "high", "low"]
 
-    # Scale features and make predictions
-    feature_data = df[feature_cols].values
+    if len(df) < window_size:
+        logging.error(f"Not enough data after preprocessing for prediction. Required: {window_size}, Found: {len(df)}")
+        return {"pair_name": pair_name, "error": f"Not enough data for prediction. Required: {window_size}, Found: {len(df)}"}
+
+    # Use only the last 10 rows for prediction
+    feature_data = df[feature_cols].tail(window_size).values
     feature_data_scaled = scaler_features.transform(feature_data)
+    seq_x = np.array([feature_data_scaled])
 
-    seq_x = np.array([feature_data_scaled[-window_size:]])
-    pred_scaled = model.predict(seq_x)
-    pred = scaler_target.inverse_transform(pred_scaled)
+    try:
+        pred_scaled = model.predict(seq_x)
+        pred = scaler_target.inverse_transform(pred_scaled)
+    except Exception as e:
+        logging.error(f"Prediction failed for {pair_name}: {e}")
+        return {"pair_name": pair_name, "error": "Prediction failed"}
 
-    open_pred, close_pred, high_pred, low_pred = map(float, pred[0])  # Convert to Python float
+    open_pred, close_pred, high_pred, low_pred = map(float, pred[0])
     direction = "Buy" if close_pred > open_pred else "Sell"
 
-    tp_pips = float(calculate_pips(open_pred, close_pred, pair_name))  # Convert to Python float
-    if direction == "Buy":
-        sl_pips = float(calculate_pips(open_pred, low_pred, pair_name))
-    else:
-        sl_pips = float(calculate_pips(open_pred, high_pred, pair_name))
+    # Determine pips multiplier based on currency pair
+    pips_multiplier = 100 if "JPY" in pair_name else 10000
 
-    risk_reward_ratio = tp_pips / sl_pips if sl_pips > 0 else None
+    # Calculate TP and SL pips
+    tp_pips = abs(close_pred - open_pred) * pips_multiplier
+    if direction == "Buy":
+        sl_pips = abs(open_pred - low_pred) * pips_multiplier
+    else:  # direction == "Sell"
+        sl_pips = abs(high_pred - open_pred) * pips_multiplier
+
+    # Calculate risk-reward ratio
+    if sl_pips > 0:  # Avoid division by zero
+        reward_ratio = tp_pips / sl_pips
+        risk_reward = f"1:{round(reward_ratio, 2)}"
+    else:
+        risk_reward = "Undefined"
+
+    # Compare predicted direction with indicator direction
+    indicator_direction = df['indicator_direction'].iloc[-1]
+    if direction != indicator_direction:
+        return {"pair_name": pair_name, "error": "Mismatch between prediction and indicators"}
 
     return {
         "pair_name": pair_name,
         "direction": direction,
-        "tp_pips": round(tp_pips, 2),
-        "sl_pips": round(sl_pips, 2),
-        "risk_reward_ratio": f"1:{round(risk_reward_ratio, 2)}" if risk_reward_ratio else "Undefined",
+        "indicator_direction": indicator_direction,
         "open_pred": round(open_pred, 5),
         "close_pred": round(close_pred, 5),
         "high_pred": round(high_pred, 5),
-        "low_pred": round(low_pred, 5)
+        "low_pred": round(low_pred, 5),
+        "tp_pips": round(tp_pips, 2),
+        "sl_pips": round(sl_pips, 2),
+        "risk_reward": risk_reward
     }
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    data = request.json
-    pair_names = data.get('pair_names')  # Note: Expecting a list of pair names
-
-    if not pair_names or not isinstance(pair_names, list):
-        return jsonify({"error": "Missing or invalid 'pair_names' in the request body. Expected a list of pair names."}), 400
+   # Liste codée en dur des paires de devises
+    pair_names = [
+        "AUDJPY", "AUDUSD", "CHFJPY", "EURCAD", "EURCHF", "EURGBP", "EURJPY", 
+        "EURUSD", "GBPCHF", "GBPJPY", "GBPUSD", "NZDJPY", "NZDUSD", "USDCAD", 
+        "USDCHF", "USDJPY", "AUDCAD", "AUDCHF", "AUDNZD", "CADCHF", "CADJPY", 
+        "EURAUD", "EURNZD", "GBPAUD", "GBPCAD", "GBPNZD", "NZDCAD", "NZDCHF"
+    ]
 
     results = []
-    try:
-        for pair_name in pair_names:
-            prediction = predict_next_bar(pair_name)  # Call your existing function
-            
-            # Extract the numeric risk/reward ratio
-            risk_reward = float(prediction['risk_reward_ratio'].split(':')[1])
-            
-            # Filter based on the condition risk/reward > 2
-            if risk_reward > 2:
-                results.append(prediction)
-                
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-        
-@app.route('/predictfromjson', methods=['POST'])
-def predict_from_json():
-    data = request.json
-    
-    # Validate input
-    pair_name = data.get('pair_name')
-    json_data = data.get('json_data')
+    for pair_name in pair_names:
+        try:
+            json_data = fetch_data(pair_name)
+            prediction = predict_next_bar(pair_name, json_data)
 
-    if not pair_name or not json_data:
-        return jsonify({"error": "Missing 'pair_name' or 'json_data' in the request body"}), 400
+            # Add to results only if there's no error and risk-reward >= 1
+            if "error" not in prediction and "risk_reward" in prediction and ":" in prediction["risk_reward"]:
+                risk, reward = map(float, prediction["risk_reward"].split(":"))
+                if reward >= 1:
+                    results.append(prediction)
+        except Exception as e:
+            logging.error(f"Error processing {pair_name}: {e}")
 
-    try:
-        # Call the prediction logic with the provided JSON data
-        result = predict_next_bar_from_json(pair_name, json_data)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if not results:
+        return jsonify({"message": "No valid predictions met the conditions."}), 200
 
+    return jsonify(results)
 
+@app.route('/predictCtreader', methods=['POST'])
+def predictCtreader():
+    # Appel de la méthode `predict` pour récupérer les résultats
+    response = predict()
+    if isinstance(response, tuple):
+        # Si une erreur survient dans `predict`, elle retourne un tuple (message, code HTTP)
+        return response[0], response[1]
+
+    # Récupération des résultats sous forme de liste JSON
+    results = response.json if hasattr(response, 'json') else response
+
+    if "message" in results:
+        # Pas de prédictions valides
+        return "No valid predictions met the conditions."
+
+    # Construction de la chaîne formatée
+    formatted_results = [
+        f"{result['pair_name']}|{result['direction']}|{result['tp_pips']}|{result['sl_pips']}"
+        for result in results
+    ]
+
+    # Retourne les résultats séparés par '@'
+    return "@".join(formatted_results)
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(debug=True, host='0.0.0.0', port=port)

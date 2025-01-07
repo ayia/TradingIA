@@ -21,6 +21,7 @@ sdist/
 var/
 wheels/
 Models/
+*.json
 share/python-wheels/
 env_tf/
 *.egg-info/

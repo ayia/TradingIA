@@ -20,7 +20,6 @@ parts/
 sdist/
 var/
 wheels/
-Models/
 training.Data/
 share/python-wheels/
 env_tf/

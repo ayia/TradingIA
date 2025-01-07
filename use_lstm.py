@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import Input
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import MinMaxScaler
@@ -54,17 +54,19 @@ def create_sequences(features, targets, sequence_length=10):
     return np.array(X), np.array(y)
 
 
-def build_lstm_model(input_shape, output_shape):
+def build_improved_lstm_model(input_shape, output_shape):
     """
-    Construit un modèle LSTM simple avec deux couches LSTM et dropout.
+    Construit un modèle LSTM amélioré avec trois couches LSTM et plus de régularisation.
     input_shape = (sequence_length, nb_features)
     output_shape = nb_targets
     """
     inputs = Input(shape=input_shape, name='LSTM_Input')
     x = LSTM(128, return_sequences=True)(inputs)
-    x = Dropout(0.2)(x)
-    x = LSTM(64, return_sequences=False)(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.3)(x)  # Régularisation
+    x = LSTM(64, return_sequences=True)(x)
+    x = Dropout(0.3)(x)  # Régularisation
+    x = LSTM(32, return_sequences=False)(x)
+    x = Dropout(0.3)(x)  # Régularisation
     outputs = Dense(output_shape, name='Output')(x)
     
     model = Model(inputs=inputs, outputs=outputs)
@@ -78,22 +80,9 @@ def build_lstm_model(input_shape, output_shape):
 
 def train_model_for_pair(json_file, output_dir='models', sequence_length=10, 
                          test_ratio=0.2, batch_size=32, epochs=50):
-    """
-    Entraîne un modèle LSTM pour la paire correspondant à 'json_file'.
-    Sauvegarde le modèle et la courbe d'entraînement dans un dossier 
-    'models/PairName' (ex: models/AUDUSD).
-
-    :param json_file: Chemin du fichier JSON (ex: ./training.Data/AUDUSD.json)
-    :param output_dir: Dossier parent où sauvegarder les modèles (ex: 'models')
-    :param sequence_length: Nombre de pas de temps pour chaque séquence
-    :param test_ratio: Proportion de données pour le test (ex: 0.2 = 20%)
-    :param batch_size: Taille de lot pour l'entraînement
-    :param epochs: Nombre d'époques
-    """
     # 1) Extraction du nom de la paire depuis le nom de fichier
-    #    Par ex. "AUDUSD" depuis "AUDUSD.json"
-    base_name = os.path.basename(json_file)          # AUDUSD.json
-    pair_name, ext = os.path.splitext(base_name)     # pair_name="AUDUSD", ext=".json"
+    base_name = os.path.basename(json_file)
+    pair_name, ext = os.path.splitext(base_name)
 
     # 2) Lecture des données
     df = load_json_file(json_file)
@@ -101,7 +90,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
         print(f"Fichier {json_file} vide ou invalide. Entraînement annulé.")
         return
     
-    df.sort_values(by='dateTime', inplace=True)  # Tri temporel si nécessaire
+    df.sort_values(by='dateTime', inplace=True)
     df.reset_index(drop=True, inplace=True)
     
     # 3) Définir les features et les cibles
@@ -109,7 +98,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
         "SMA_20", "SMA_50", "EMA_20", "EMA_50", "RSI",
         "MACD", "MACD_Signal", "MACD_Diff",
         "bollinger_High", "bollinger_Low", "ATR",
-        "open", "close", "high", "low", "volume"
+        "open", "close", "high", "low"  # Retirer "volume"
     ]
     target_columns = ["open", "close", "high", "low"]
 
@@ -125,7 +114,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     
     # 4) Division Train/Test
     n = len(df)
-    split_index = int(n * (1 - test_ratio))  # ex: 80% train / 20% test
+    split_index = int(n * (1 - test_ratio))
     features_train = features[:split_index]
     features_test = features[split_index:]
     targets_train = targets[:split_index]
@@ -134,7 +123,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     # 5) Normalisation
     scaler_X = MinMaxScaler()
     scaler_y = MinMaxScaler()
-    scaler_X.fit(features_train)  # Ajustement sur la partie train
+    scaler_X.fit(features_train)
     scaler_y.fit(targets_train)
     
     X_train_scaled = scaler_X.transform(features_train)
@@ -146,7 +135,6 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     X_train_seq, y_train_seq = create_sequences(X_train_scaled, y_train_scaled, sequence_length)
     X_test_seq, y_test_seq = create_sequences(X_test_scaled, y_test_scaled, sequence_length)
 
-    # Vérification qu'on a assez de données séquencées
     if len(X_train_seq) == 0 or len(X_test_seq) == 0:
         print(f"Données insuffisantes pour la paire {pair_name} (sequence_length={sequence_length}).")
         return
@@ -155,10 +143,10 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     print(f" - X_train_seq: {X_train_seq.shape}, y_train_seq: {y_train_seq.shape}")
     print(f" - X_test_seq: {X_test_seq.shape},  y_test_seq: {y_test_seq.shape}")
     
-    # 7) Construction du modèle
-    input_shape = (sequence_length, X_train_seq.shape[2])  # (10, nb_features)
-    output_shape = y_train_seq.shape[1]                    # 4 (OHLC)
-    model = build_lstm_model(input_shape, output_shape)
+    # 7) Construction du modèle amélioré
+    input_shape = (sequence_length, X_train_seq.shape[2])
+    output_shape = y_train_seq.shape[1]
+    model = build_improved_lstm_model(input_shape, output_shape)
 
     # Callback d'arrêt anticipé
     early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
@@ -173,7 +161,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
         verbose=1
     )
     
-    # 9) Création du dossier de sortie "models/pairName" s'il n'existe pas
+    # 9) Création du dossier de sortie
     pair_dir = os.path.join(output_dir, pair_name)
     os.makedirs(pair_dir, exist_ok=True)
 
@@ -204,9 +192,7 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     y_pred = scaler_y.inverse_transform(y_pred_scaled)
     y_true = scaler_y.inverse_transform(y_test_seq)
     
-    # On peut enregistrer y_pred vs y_true dans un CSV
-    # Format : columns = [pred_open, pred_close, pred_high, pred_low,
-    #                     true_open, true_close, true_high, true_low]
+    # Enregistrement des prédictions
     predictions_csv = os.path.join(pair_dir, "test_predictions.csv")
     pred_df = pd.DataFrame(np.concatenate([y_pred, y_true], axis=1),
                            columns=[
@@ -215,6 +201,31 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
                            ])
     pred_df.to_csv(predictions_csv, index=False)
     print(f"Fichier de prédictions sauvegardé : {predictions_csv}")
+
+    # 14) Calcul du pourcentage de prédictions réussies avec différentes tolérances
+    for tolerance in [0.001, 0.0005, 0.0001]:  # 0.1%, 0.05%, 0.01%
+        successful_predictions = 0
+        for i in range(len(y_true)):
+            for j in range(len(y_true[i])):
+                if abs(y_pred[i][j] - y_true[i][j]) / y_true[i][j] <= tolerance:
+                    successful_predictions += 1
+
+        total_predictions = len(y_true) * len(y_true[0])
+        success_rate = (successful_predictions / total_predictions) * 100
+
+        print(f"Pourcentage de prédictions réussies (tolérance de {tolerance*100}%) : {success_rate:.2f}%")
+    
+    # 15) Visualisation des erreurs
+    plt.figure(figsize=(12, 6))
+    plt.plot(abs(y_pred - y_true).mean(axis=1), label='Erreur moyenne', color='purple', linewidth=1.5)
+    plt.title(f'Erreurs des prédictions - {pair_name}')
+    plt.xlabel('Pas de temps')
+    plt.ylabel('Erreur absolue moyenne')
+    plt.legend()
+    error_plot_path = os.path.join(pair_dir, "error_plot.png")
+    plt.savefig(error_plot_path)
+    plt.close()
+    print(f"Graphique des erreurs sauvegardé : {error_plot_path}")
     print("--------------------------------------------------------\n")
 
 
@@ -229,7 +240,7 @@ def main():
     models_folder = './models'
 
     # Paramètres communs
-    sequence_length = 10
+    sequence_lengths = [10, 20, 30]  # Testez différentes valeurs
     test_ratio = 0.2
     batch_size = 32
     epochs = 50
@@ -241,14 +252,16 @@ def main():
         return
     
     for json_file in json_files:
-        train_model_for_pair(
-            json_file,
-            output_dir=models_folder,
-            sequence_length=sequence_length,
-            test_ratio=test_ratio,
-            batch_size=batch_size,
-            epochs=epochs
-        )
+        for seq_len in sequence_lengths:
+            print(f"\nEntraînement avec sequence_length = {seq_len}")
+            train_model_for_pair(
+                json_file,
+                output_dir=models_folder,
+                sequence_length=seq_len,
+                test_ratio=test_ratio,
+                batch_size=batch_size,
+                epochs=epochs
+            )
 
 
 if __name__ == '__main__':

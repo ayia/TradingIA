@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import Input
-from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import LSTM, Dropout, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.preprocessing import MinMaxScaler
@@ -56,17 +56,19 @@ def create_sequences(features, targets, sequence_length=10):
 
 def build_improved_lstm_model(input_shape, output_shape):
     """
-    Construit un modèle LSTM amélioré avec trois couches LSTM et plus de régularisation.
+    Construit un modèle LSTM amélioré avec quatre couches LSTM et plus de régularisation.
     input_shape = (sequence_length, nb_features)
     output_shape = nb_targets
     """
     inputs = Input(shape=input_shape, name='LSTM_Input')
-    x = LSTM(128, return_sequences=True)(inputs)
-    x = Dropout(0.3)(x)  # Régularisation
+    x = LSTM(256, return_sequences=True)(inputs)
+    x = Dropout(0.4)(x)  # Régularisation
+    x = LSTM(128, return_sequences=True)(x)
+    x = Dropout(0.4)(x)  # Régularisation
     x = LSTM(64, return_sequences=True)(x)
-    x = Dropout(0.3)(x)  # Régularisation
+    x = Dropout(0.4)(x)  # Régularisation
     x = LSTM(32, return_sequences=False)(x)
-    x = Dropout(0.3)(x)  # Régularisation
+    x = Dropout(0.4)(x)  # Régularisation
     outputs = Dense(output_shape, name='Output')(x)
     
     model = Model(inputs=inputs, outputs=outputs)
@@ -79,7 +81,7 @@ def build_improved_lstm_model(input_shape, output_shape):
 ##############################################################################
 
 def train_model_for_pair(json_file, output_dir='models', sequence_length=10, 
-                         test_ratio=0.2, batch_size=32, epochs=50):
+                         test_ratio=0.2, batch_size=32, epochs=100):
     # 1) Extraction du nom de la paire depuis le nom de fichier
     base_name = os.path.basename(json_file)
     pair_name, ext = os.path.splitext(base_name)
@@ -97,8 +99,8 @@ def train_model_for_pair(json_file, output_dir='models', sequence_length=10,
     feature_columns = [
         "SMA_20", "SMA_50", "EMA_20", "EMA_50", "RSI",
         "MACD", "MACD_Signal", "MACD_Diff",
-        "bollinger_High", "bollinger_Low", "ATR",
-        "open", "close", "high", "low"  # Retirer "volume"
+        "bollinger_High", "bollinger_Low", "ATR",  # ATR est un indicateur de volatilité
+        "open", "close", "high", "low"
     ]
     target_columns = ["open", "close", "high", "low"]
 
@@ -240,10 +242,10 @@ def main():
     models_folder = './models'
 
     # Paramètres communs
-    sequence_lengths = [10, 20, 30]  # Testez différentes valeurs
+    sequence_lengths = [10, 15, 20]  # Testez différentes valeurs
     test_ratio = 0.2
-    batch_size = 32
-    epochs = 50
+    batch_sizes = [16, 32, 64]  # Testez différentes tailles de batch
+    epochs = 100  # Augmentez le nombre d'époques
 
     # Recherche de tous les fichiers .json dans training.Data
     json_files = glob.glob(os.path.join(training_data_path, '*.json'))
@@ -253,15 +255,16 @@ def main():
     
     for json_file in json_files:
         for seq_len in sequence_lengths:
-            print(f"\nEntraînement avec sequence_length = {seq_len}")
-            train_model_for_pair(
-                json_file,
-                output_dir=models_folder,
-                sequence_length=seq_len,
-                test_ratio=test_ratio,
-                batch_size=batch_size,
-                epochs=epochs
-            )
+            for batch_size in batch_sizes:
+                print(f"\nEntraînement avec sequence_length = {seq_len}, batch_size = {batch_size}")
+                train_model_for_pair(
+                    json_file,
+                    output_dir=models_folder,
+                    sequence_length=seq_len,
+                    test_ratio=test_ratio,
+                    batch_size=batch_size,
+                    epochs=epochs
+                )
 
 
 if __name__ == '__main__':

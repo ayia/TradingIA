@@ -20,6 +20,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 ##############################################################################
 
 def load_json_file(file_path):
+    """Charge un fichier JSON et retourne un DataFrame."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -40,6 +41,7 @@ def load_json_file(file_path):
         return None
 
 def create_sequences(features, targets, sequence_length=10):
+    """Crée des séquences pour l'entraînement du modèle LSTM."""
     X, y = [], []
     for i in range(len(features) - sequence_length):
         X.append(features[i:i+sequence_length])
@@ -47,22 +49,17 @@ def create_sequences(features, targets, sequence_length=10):
     return np.array(X), np.array(y)
 
 def build_optimized_lstm_model(input_shape, output_shape):
+    """Construit un modèle LSTM optimisé."""
     inputs = Input(shape=input_shape, name='LSTM_Input')
-    x = LSTM(512, return_sequences=True)(inputs)
+    x = LSTM(256, return_sequences=True)(inputs)
     x = BatchNormalization()(x)
-    x = Dropout(0.5)(x)
-    x = LSTM(256, return_sequences=True)(x)
+    x = Dropout(0.3)(x)
+    x = LSTM(128, return_sequences=False)(x)
     x = BatchNormalization()(x)
-    x = Dropout(0.5)(x)
-    x = LSTM(128, return_sequences=True)(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.5)(x)
-    x = LSTM(64, return_sequences=False)(x)
-    x = BatchNormalization()(x)
-    x = Dropout(0.5)(x)
+    x = Dropout(0.3)(x)
     x = Dense(64, activation='relu')(x)
     x = BatchNormalization()(x)
-    x = Dropout(0.5)(x)
+    x = Dropout(0.3)(x)
     outputs = Dense(output_shape)(x)
     model = Model(inputs=inputs, outputs=outputs)
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
@@ -70,6 +67,7 @@ def build_optimized_lstm_model(input_shape, output_shape):
     return model
 
 def save_best_model_info(pair_dir, sequence_length, batch_size, success_rate_01, success_rate_005, success_rate_001):
+    """Sauvegarde les informations du meilleur modèle."""
     info_path = os.path.join(pair_dir, "best_model_info.txt")
     with open(info_path, 'w') as f:
         f.write(f"sequence_length: {sequence_length}\n")
@@ -83,6 +81,7 @@ def save_best_model_info(pair_dir, sequence_length, batch_size, success_rate_01,
 ##############################################################################
 
 def train_model_for_pair(args):
+    """Entraîne un modèle LSTM pour une paire de trading spécifique."""
     # Récupérer les arguments
     json_file, output_dir, sequence_length, test_ratio, batch_size, epochs = args
     
@@ -99,6 +98,7 @@ def train_model_for_pair(args):
     df.sort_values(by='dateTime', inplace=True)
     df.reset_index(drop=True, inplace=True)
     
+    # Liste des indicateurs techniques (ajoutez ou retirez selon vos besoins)
     feature_columns = [
         "SMA_20", "SMA_50", "EMA_20", "EMA_50", "RSI",
         "MACD", "MACD_Signal", "MACD_Diff",
@@ -117,6 +117,7 @@ def train_model_for_pair(args):
     ]
     target_columns = ["open", "close", "high", "low"]
 
+    # Vérification robuste des colonnes
     missing_cols = set(feature_columns + target_columns + ["dateTime"]) - set(df.columns)
     if missing_cols:
         print(f"Error: Missing columns in {json_file}: {missing_cols}. Training aborted.")

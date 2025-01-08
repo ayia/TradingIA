@@ -246,9 +246,9 @@ def train_model_for_pair(args):
 def main():
     training_data_path = './training.Data'
     models_folder = './models'
-    sequence_lengths = [10, 15, 20, 30, 50]
+    sequence_lengths = [15, 20, 30]
     test_ratio = 0.2
-    batch_sizes = [8, 16, 32, 64, 128]
+    batch_sizes = [32, 64, 128]
     epochs = 100
 
     json_files = glob.glob(os.path.join(training_data_path, '*.json'))

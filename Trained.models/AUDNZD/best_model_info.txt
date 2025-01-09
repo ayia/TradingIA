@@ -1,0 +1,5 @@
+sequence_length: 15
+batch_size: 32
+Pourcentage de prédictions réussies (tolérance de 0.1%): 80.19%
+Pourcentage de prédictions réussies (tolérance de 0.05%): 48.30%
+Pourcentage de prédictions réussies (tolérance de 0.01%): 10.11%

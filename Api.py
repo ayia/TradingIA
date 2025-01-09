@@ -2,9 +2,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import tensorflow as tf
 import os
-import json
 import numpy as np
-from sklearn.preprocessing import RobustScaler
+import joblib  # Utiliser joblib pour charger les scalers
 
 # Initialiser FastAPI
 app = FastAPI()
@@ -19,21 +18,21 @@ class PredictionRequest(BaseModel):
 
 # Fonction pour charger un modèle basé sur le nom de la paire
 def load_model(pair_name):
-    model_path = os.path.join(MODEL_DIR, pair_name, "best_model.keras")
+    model_path = os.path.join(MODEL_DIR, pair_name, "lstm_model.keras")
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Modèle non trouvé pour la paire : {pair_name}")
     return tf.keras.models.load_model(model_path)
 
-# Fonction pour prétraiter les données
+# Fonction pour prétraiter les données avec joblib
 def preprocess_data(data, scaler_path):
-    scaler = RobustScaler()
     scaler_file = os.path.join(scaler_path, "scaler_X.pkl")
     if not os.path.exists(scaler_file):
         raise FileNotFoundError("Scaler introuvable pour le prétraitement.")
+
+    # Charger le scaler avec joblib
+    scaler = joblib.load(scaler_file)
     
-    with open(scaler_file, "rb") as f:
-        scaler = json.load(f)
-    
+    # Appliquer la transformation
     data_scaled = scaler.transform(data)
     return data_scaled
 
@@ -60,11 +59,21 @@ async def predict(request: PredictionRequest):
 
         # Post-traitement pour revenir aux échelles originales
         scaler_y_path = os.path.join(scaler_path, "scaler_y.pkl")
-        with open(scaler_y_path, "rb") as f:
-            scaler_y = json.load(f)
+        if not os.path.exists(scaler_y_path):
+            raise FileNotFoundError("Scaler Y introuvable pour l'inverse transformation.")
+        
+        scaler_y = joblib.load(scaler_y_path)
         predictions_original = scaler_y.inverse_transform(predictions)
 
-        return {"pair_name": pair_name, "predictions": predictions_original.tolist()}
+        # Formater la réponse avec des valeurs converties en float natif
+        formatted_predictions = {
+            "Open": round(float(predictions_original[0][0]), 5),
+            "Close": round(float(predictions_original[0][1]), 5),
+            "High": round(float(predictions_original[0][2]), 5),
+            "Low": round(float(predictions_original[0][3]), 5)
+        }
+
+        return {"pair_name": pair_name, "predictions": [formatted_predictions]}
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

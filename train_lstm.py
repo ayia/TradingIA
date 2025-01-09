@@ -11,6 +11,7 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCh
 from sklearn.preprocessing import RobustScaler
 import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor
+import joblib  # Ajout de joblib pour sauvegarder les scalers
 
 # Désactiver le GPU pour forcer l'utilisation du CPU
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -204,6 +205,13 @@ def train_model_for_pair(args):
         model.save(model_path)
         print(f"Modèle sauvegardé : {model_path}")
         save_best_model_info(pair_dir, sequence_length, batch_size, success_rates[0.001], success_rates[0.0005], success_rates[0.0001])
+        
+        # Sauvegarder les scalers
+        scaler_X_path = os.path.join(pair_dir, "scaler_X.pkl")
+        scaler_y_path = os.path.join(pair_dir, "scaler_y.pkl")
+        joblib.dump(scaler_X, scaler_X_path)
+        joblib.dump(scaler_y, scaler_y_path)
+        print(f"Scalers sauvegardés : {scaler_X_path}, {scaler_y_path}")
         
         plt.figure(figsize=(10, 5))
         plt.plot(history.history['loss'], label='Perte Entraînement')

@@ -74,17 +74,19 @@ async def predict(request: PredictionRequest):
         # Déterminer la direction
         direction = "Bullish" if close_price > open_price else "Bearish"
 
-        # Calculer TP et SL
-        tp_pips = abs(close_price - open_price) * 10000  # TP en pips
-        sl_pips = tp_pips / 2  # SL est la moitié de TP
+        # Calculer TP et SL (ajustez les pips selon vos besoins)
+        tp_pips = 0.0010  # Exemple : 10 pips
+        sl_pips = 0.0010  # Exemple : 10 pips
 
         if direction == "Bullish":
-            tp = close_price + (tp_pips / 10000)
-            sl = close_price - (sl_pips / 10000)
+            tp_pips = abs(high_price - open_price) * 10000 
+            sl_pips=abs(open_price - low_price) * 1000
+           
         else:
-            tp = close_price - (tp_pips / 10000)
-            sl = close_price + (sl_pips / 10000)
+            tp_pips = abs(open_price - low_price) * 10000
+            sl_pips=abs(high_price - open_price) * 1000
 
+       
         # Formater la réponse avec les nouvelles informations
         formatted_predictions = {
             "Open": round(open_price, 5),
@@ -92,10 +94,8 @@ async def predict(request: PredictionRequest):
             "High": round(high_price, 5),
             "Low": round(low_price, 5),
             "Direction": direction,
-            "TP (pips)": round(tp_pips, 2),
-            "SL (pips)": round(sl_pips, 2),
-            "TP": round(tp, 5),
-            "SL": round(sl, 5)
+            "TP Pips": round(tp_pips, 2),
+            "SL Pips": round(sl_pips, 2)
         }
 
         return {"pair_name": pair_name, "predictions": [formatted_predictions]}

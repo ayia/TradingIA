@@ -65,12 +65,37 @@ async def predict(request: PredictionRequest):
         scaler_y = joblib.load(scaler_y_path)
         predictions_original = scaler_y.inverse_transform(predictions)
 
-        # Formater la réponse avec des valeurs converties en float natif
+        # Extraire les valeurs
+        open_price = float(predictions_original[0][0])
+        close_price = float(predictions_original[0][1])
+        high_price = float(predictions_original[0][2])
+        low_price = float(predictions_original[0][3])
+
+        # Déterminer la direction
+        direction = "Bullish" if close_price > open_price else "Bearish"
+
+        # Calculer TP et SL
+        tp_pips = abs(close_price - open_price) * 10000  # TP en pips
+        sl_pips = tp_pips / 2  # SL est la moitié de TP
+
+        if direction == "Bullish":
+            tp = close_price + (tp_pips / 10000)
+            sl = close_price - (sl_pips / 10000)
+        else:
+            tp = close_price - (tp_pips / 10000)
+            sl = close_price + (sl_pips / 10000)
+
+        # Formater la réponse avec les nouvelles informations
         formatted_predictions = {
-            "Open": round(float(predictions_original[0][0]), 5),
-            "Close": round(float(predictions_original[0][1]), 5),
-            "High": round(float(predictions_original[0][2]), 5),
-            "Low": round(float(predictions_original[0][3]), 5)
+            "Open": round(open_price, 5),
+            "Close": round(close_price, 5),
+            "High": round(high_price, 5),
+            "Low": round(low_price, 5),
+            "Direction": direction,
+            "TP (pips)": round(tp_pips, 2),
+            "SL (pips)": round(sl_pips, 2),
+            "TP": round(tp, 5),
+            "SL": round(sl, 5)
         }
 
         return {"pair_name": pair_name, "predictions": [formatted_predictions]}

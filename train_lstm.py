@@ -110,11 +110,8 @@ def train_model_for_pair(args):
         "ADX",
         "CCI",
         "WilliamsR",
-        "Hour", "DayOfWeek",
         "Close_Lag1", "Close_Lag2",
-        "SMA_20_Slope",
-        "Trend",
-        "IsDoji", "IsEngulfing", "IsHammer", "IsHangingMan"
+        "SMA_20_Slope"
     ]
     target_columns = ["open", "close", "high", "low"]
 

@@ -73,81 +73,19 @@ def predict():
         sl_pips = abs(sl_price - open_price) * 10000
 
         result = {
-            "Open": round(open_price, 5),
+          "Direction": direction,
+                      
+           "Open": round(open_price, 5),
             "Close": round(close_price, 5),
             "High": round(high_price, 5),
             "Low": round(low_price, 5),
-            "Direction": direction,
-            "TP Price": round(tp_price, 5),
-            "SL Price": round(sl_price, 5),
-            "TP Pips": round(tp_pips, 2),
-            "SL Pips": round(sl_pips, 2),
-            "ATR": round(atr, 5),
+           
         }
 
         return jsonify({"pair_name": pair_name, "predictions": [result]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Endpoint: /fetch_and_predict
-@app.route('/fetch_and_predict', methods=['POST'])
-def fetch_and_predict():
-    try:
-        pair_name = request.args.get("pair_name")
-        interval = request.args.get("interval", "OneHour")
-        limits = int(request.args.get("limits", 20))
-        aba = request.args.get("aba", "Lastyear")
-
-        external_api_url = "https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/PreparePredictionData"
-        params = {"currencyPairs": pair_name, "interval": interval, "limits": limits, "aba": aba}
-        response = requests.post(external_api_url, params=params)
-
-        if response.status_code != 200:
-            return jsonify({"error": "Failed to fetch data from external API"}), 500
-
-        data = response.json()
-        if not data or "data" not in data or not isinstance(data["data"], list):
-            return jsonify({"error": "Invalid data from external API"}), 400
-
-        return predict()
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Endpoint: /fetch_and_predict_string
-@app.route('/fetch_and_predict_string', methods=['POST'])
-def fetch_and_predict_string():
-    try:
-        pair_name = request.args.get("pair_name")
-        interval = request.args.get("interval", "OneHour")
-        limits = int(request.args.get("limits", 20))
-        aba = request.args.get("aba", "Lastyear")
-
-        external_api_url = "https://forex-bestshots-black-meadow-4133.fly.dev/api/FetchPairsData/PreparePredictionData"
-        params = {"currencyPairs": pair_name, "interval": interval, "limits": limits, "aba": aba}
-        response = requests.post(external_api_url, params=params)
-
-        if response.status_code != 200:
-            return "null"
-
-        data = response.json()
-        if not data or "data" not in data or not isinstance(data["data"], list):
-            return "null"
-
-        prediction_request = {"pair_name": pair_name, "data": data["data"]}
-        prediction_response = predict()
-        if prediction_response.status_code != 200:
-            return "null"
-
-        prediction_result = prediction_response.get_json()
-        if "predictions" in prediction_result and prediction_result["predictions"]:
-            prediction = prediction_result["predictions"][0]
-            return f"{prediction['Direction']}|{prediction['Open']}|{prediction['TP Pips']}|{prediction['SL Pips']}"
-        else:
-            return "null"
-
-    except Exception:
-        return "null"
 
 # Run Flask app
 if __name__ == "__main__":

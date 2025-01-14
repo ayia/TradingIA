@@ -73,12 +73,11 @@ def predict():
         sl_pips = abs(sl_price - open_price) * 10000
 
         result = {
-          "Direction": direction,
-                      
+          "Direction": direction,       
            "Open": round(open_price, 5),
             "Close": round(close_price, 5),
             "High": round(high_price, 5),
-            "Low": round(low_price, 5),
+            "Low": round(low_price, 5)
            
         }
 

@@ -77,7 +77,9 @@ def predict():
            "Open": round(open_price, 5),
             "Close": round(close_price, 5),
             "High": round(high_price, 5),
-            "Low": round(low_price, 5)
+            "Low": round(low_price, 5),
+            "UpPips": round(tp_pips, 2),
+            "DownPips": round(sl_pips, 2),
            
         }
 

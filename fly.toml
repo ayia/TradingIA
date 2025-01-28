@@ -1,22 +1,18 @@
-# fly.toml app configuration file generated for tradingia on 2025-01-14T22:31:14Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'tradingia'
-primary_region = 'mad'
-
-[build]
+app = "tradingia"
+primary_region = "mad"
 
 [http_service]
-internal_port = 8080  # Update this to match the Dockerfile
+internal_port = 8080  # Match the Dockerfile
 force_https = true
 auto_start_machines = true
 auto_stop_machines = true
 min_machines_running = 0
 processes = ["app"]
 
-[[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
-  cpus = 1
+[env]
+# Add any required environment variables here
+
+[vm]
+cpu_kind = "Performance"
+cpus = 1
+memory = "2gb"

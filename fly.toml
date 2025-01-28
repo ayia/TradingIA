@@ -13,6 +13,6 @@ processes = ["app"]
 # Add any required environment variables here
 
 [vm]
-cpu_kind = "Performance"
+cpu_kind = "shared"
 cpus = 1
 memory = "2gb"

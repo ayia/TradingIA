@@ -1,26 +1,20 @@
-# Ignore Git and GitHub files
-.git
-.github/
-
-# Ignore Husky configuration files
-.husky/
-
-# Ignore documentation and metadata files
-CONTRIBUTING.md
-LICENSE
-README.md
-
-# Ignore environment examples and sensitive info
-.env
-*.local
-*.example
-
-# Ignore node modules, logs and cache files
-**/*.log
-**/node_modules
-**/dist
-**/build
-**/.cache
-logs
-dist-ssr
+.github
 .DS_Store
+docs
+kubernetes
+node_modules
+/.svelte-kit
+/package
+.env
+.env.*
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+__pycache__
+.idea
+venv
+_old
+uploads
+.ipynb_checkpoints
+**/*.db
+_test
+backend/data/*

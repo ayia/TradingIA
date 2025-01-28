@@ -12,3 +12,5 @@ _test
 !data/litellm/config.yaml
 
 !data/config.json
+# Exclude all Markdown files
+*.md

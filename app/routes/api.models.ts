@@ -41,17 +41,11 @@ function getProviderInfo(llmManager: LLMManager) {
 export async function loader({
   request,
   params,
-  context,
 }: {
   request: Request;
   params: { provider?: string };
-  context: {
-    cloudflare?: {
-      env: Record<string, string>;
-    };
-  };
 }): Promise<Response> {
-  const llmManager = LLMManager.getInstance(context.cloudflare?.env);
+  const llmManager = LLMManager.getInstance(import.meta.env);
 
   // Get client side maintained API keys and provider settings from cookies
   const cookieHeader = request.headers.get('Cookie');
@@ -69,7 +63,7 @@ export async function loader({
     if (provider) {
       const staticModels = provider.staticModels;
       const dynamicModels = provider.getDynamicModels
-        ? await provider.getDynamicModels(apiKeys, providerSettings, context.cloudflare?.env)
+        ? await provider.getDynamicModels(apiKeys, providerSettings, import.meta.env)
         : [];
       modelList = [...staticModels, ...dynamicModels];
     }
@@ -78,7 +72,7 @@ export async function loader({
     modelList = await llmManager.updateModelList({
       apiKeys,
       providerSettings,
-      serverEnv: context.cloudflare?.env,
+      serverEnv: import.meta.env,
     });
   }
 

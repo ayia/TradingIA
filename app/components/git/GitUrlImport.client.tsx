@@ -7,7 +7,7 @@ import { BaseChat } from '~/components/chat/BaseChat';
 import { Chat } from '~/components/chat/Chat.client';
 import { useGit } from '~/lib/hooks/useGit';
 import { useChatHistory } from '~/lib/persistence';
-import { createCommandsMessage, detectProjectCommands, escapeBoltTags } from '~/utils/projectCommands';
+import { createCommandsMessage, detectProjectCommands } from '~/utils/projectCommands';
 import { LoadingOverlay } from '~/components/ui/LoadingOverlay';
 import { toast } from 'react-toastify';
 
@@ -74,12 +74,12 @@ export function GitUrlImport() {
           const filesMessage: Message = {
             role: 'assistant',
             content: `Cloning the repo ${repoUrl} into ${workdir}
-<boltArtifact id="imported-files" title="Git Cloned Files"  type="bundled">
+<boltArtifact id="imported-files" title="Git Cloned Files" type="bundled">
 ${fileContents
   .map(
     (file) =>
       `<boltAction type="file" filePath="${file.path}">
-${escapeBoltTags(file.content)}
+${file.content}
 </boltAction>`,
   )
   .join('\n')}
@@ -94,7 +94,7 @@ ${escapeBoltTags(file.content)}
             messages.push(commandsMessage);
           }
 
-          await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages, { gitUrl: repoUrl });
+          await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages);
         }
       } catch (error) {
         console.error('Error during import:', error);

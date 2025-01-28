@@ -18,7 +18,6 @@ import { EditorPanel } from './EditorPanel';
 import { Preview } from './Preview';
 import useViewport from '~/lib/hooks';
 import Cookies from 'js-cookie';
-import { chatMetadata, useChatHistory } from '~/lib/persistence';
 
 interface WorkspaceProps {
   chatStarted?: boolean;
@@ -67,8 +66,6 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
   const unsavedFiles = useStore(workbenchStore.unsavedFiles);
   const files = useStore(workbenchStore.files);
   const selectedView = useStore(workbenchStore.currentView);
-  const metadata = useStore(chatMetadata);
-  const { updateChatMestaData } = useChatHistory();
 
   const isSmallViewport = useViewport(1024);
 
@@ -174,28 +171,18 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
                     <PanelHeaderButton
                       className="mr-1 text-sm"
                       onClick={() => {
-                        let repoName = metadata?.gitUrl?.split('/').slice(-1)[0]?.replace('.git', '') || null;
-                        let repoConfirmed: boolean = true;
-
-                        if (repoName) {
-                          repoConfirmed = confirm(`Do you want to push to the repository ${repoName}?`);
-                        }
-
-                        if (!repoName || !repoConfirmed) {
-                          repoName = prompt(
-                            'Please enter a name for your new GitHub repository:',
-                            'bolt-generated-project',
-                          );
-                        } else {
-                        }
+                        const repoName = prompt(
+                          'Please enter a name for your new GitHub repository:',
+                          'bolt-generated-project',
+                        );
 
                         if (!repoName) {
                           alert('Repository name is required. Push to GitHub cancelled.');
                           return;
                         }
 
-                        let githubUsername = Cookies.get('githubUsername');
-                        let githubToken = Cookies.get('githubToken');
+                        const githubUsername = Cookies.get('githubUsername');
+                        const githubToken = Cookies.get('githubToken');
 
                         if (!githubUsername || !githubToken) {
                           const usernameInput = prompt('Please enter your GitHub username:');
@@ -206,26 +193,9 @@ export const Workbench = memo(({ chatStarted, isStreaming }: WorkspaceProps) => 
                             return;
                           }
 
-                          githubUsername = usernameInput;
-                          githubToken = tokenInput;
-
-                          Cookies.set('githubUsername', usernameInput);
-                          Cookies.set('githubToken', tokenInput);
-                          Cookies.set(
-                            'git:github.com',
-                            JSON.stringify({ username: tokenInput, password: 'x-oauth-basic' }),
-                          );
-                        }
-
-                        const commitMessage =
-                          prompt('Please enter a commit message:', 'Initial commit') || 'Initial commit';
-                        workbenchStore.pushToGitHub(repoName, commitMessage, githubUsername, githubToken);
-
-                        if (!metadata?.gitUrl) {
-                          updateChatMestaData({
-                            ...(metadata || {}),
-                            gitUrl: `https://github.com/${githubUsername}/${repoName}.git`,
-                          });
+                          workbenchStore.pushToGitHub(repoName, usernameInput, tokenInput);
+                        } else {
+                          workbenchStore.pushToGitHub(repoName, githubUsername, githubToken);
                         }
                       }}
                     >

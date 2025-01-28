@@ -1,12 +1,11 @@
 import ignore from 'ignore';
 import { useGit } from '~/lib/hooks/useGit';
 import type { Message } from 'ai';
-import { detectProjectCommands, createCommandsMessage, escapeBoltTags } from '~/utils/projectCommands';
+import { detectProjectCommands, createCommandsMessage } from '~/utils/projectCommands';
 import { generateId } from '~/utils/fileUtils';
 import { useState } from 'react';
 import { toast } from 'react-toastify';
 import { LoadingOverlay } from '~/components/ui/LoadingOverlay';
-import type { IChatMetadata } from '~/lib/persistence';
 
 const IGNORE_PATTERNS = [
   'node_modules/**',
@@ -36,7 +35,7 @@ const ig = ignore().add(IGNORE_PATTERNS);
 
 interface GitCloneButtonProps {
   className?: string;
-  importChat?: (description: string, messages: Message[], metadata?: IChatMetadata) => Promise<void>;
+  importChat?: (description: string, messages: Message[]) => Promise<void>;
 }
 
 export default function GitCloneButton({ importChat }: GitCloneButtonProps) {
@@ -84,7 +83,7 @@ ${fileContents
   .map(
     (file) =>
       `<boltAction type="file" filePath="${file.path}">
-${escapeBoltTags(file.content)}
+${file.content}
 </boltAction>`,
   )
   .join('\n')}
@@ -99,7 +98,7 @@ ${escapeBoltTags(file.content)}
             messages.push(commandsMessage);
           }
 
-          await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages, { gitUrl: repoUrl });
+          await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages);
         }
       } catch (error) {
         console.error('Error during import:', error);
